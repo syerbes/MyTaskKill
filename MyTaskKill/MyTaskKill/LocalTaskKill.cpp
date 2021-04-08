@@ -26,10 +26,7 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 
 	// Step 2: --------------------------------------------------
 	// Set general COM security levels --------------------------
-	// Note: If you are using Windows 2000, specify -
-	// the default authentication credentials for a user by using
-	// a SOLE_AUTHENTICATION_LIST structure in the pAuthList ----
-	// parameter of CoInitializeSecurity ------------------------
+
 
 	hres = CoInitializeSecurity(
 		NULL,
@@ -80,14 +77,14 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 	// Connect to the local root\cimv2 namespace
 	// and obtain pointer pSvc to make IWbemServices calls.
 	hres = pLoc->ConnectServer(
-		_bstr_t(L"ROOT\\CIMV2"),
-		NULL,
-		NULL,
-		0,
-		NULL,
-		0,
-		0,
-		&pSvc
+		_bstr_t(L"ROOT\\CIMV2"), // WMI Namespace
+		NULL,                    // User name
+		NULL,                    // User password
+		0,                       // Locale
+		NULL,                    // Security flags                 
+		0,                       // Authority    
+		0,                       // Context object
+		&pSvc                    // IWbemServices proxy
 	);
 
 	if (FAILED(hres))
@@ -130,19 +127,21 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 	// Step 6: --------------------------------------------------
 	// Use the IWbemServices pointer to make requests of WMI ----
 
-
+	// Code to Handle PID type requests
 	if (mode == "/PID") {
+		// Code to handle PID based requests without /T flag
 		if (child == "NoChild") {
-			// Set up to call the Win32_Process::Create method
+			// Set up to call the Win32_Process::Terminate method
 			BSTR ClassName = SysAllocString(L"Win32_Process");
 
-
+			// Setting handler to locate the Process to Terminate specified as parameter
 			std::wstring classNameInstance = L"Win32_Process.Handle=";
 			std::wstring argumentString(argument);
 			classNameInstance.append(L"\"").append(argumentString).append(L"\"");
 			BSTR ClassNameInstance = SysAllocString(
 				classNameInstance.c_str());
 
+			// Preparing context for Method call
 			_bstr_t MethodName = (L"Terminate");
 			BSTR ParameterName = SysAllocString(L"Reason");
 
@@ -151,6 +150,8 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 
 			IWbemClassObject* pInParamsDefinition = NULL;
 			IWbemClassObject* pOutMethod = NULL;
+
+			// Getting Terminate method for later execution
 			hres = pClass->GetMethod(MethodName, 0,
 				&pInParamsDefinition, &pOutMethod);
 
@@ -199,11 +200,11 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 
 			// Clean up
 			//--------------------------
-			//VariantClear(&pcVal);
-			//SysFreeString(ClassName);
-			//SysFreeString(MethodName);
+			VariantClear(&pcVal);
+			SysFreeString(ClassName);
+			SysFreeString(MethodName);
 			//pClass->Release();
-			//pInParamsDefinition->Release();
+			pInParamsDefinition->Release();
 			//pLoc->Release();
 			//pSvc->Release();
 			//CoUninitialize();
@@ -211,6 +212,7 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 		}
 		// Child Mode
 		else {
+			// Executing query to obtain all Process Objects
 			IEnumWbemClassObject* pEnumerator = NULL;
 			hres = pSvc->ExecQuery(
 				bstr_t("WQL"),
@@ -234,6 +236,7 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 
 			wchar_t* pid;
 
+			// Iterate all processes
 			while (pEnumerator)
 			{
 				hres = pEnumerator->Next(WBEM_INFINITE, 1,
@@ -247,17 +250,19 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 				VARIANT vtProp;
 				VARIANT vtProp2;
 
-				// Get the value of the Name property
+				// Get the value of the PID and Parent PID properties
 				hres = pclsObj->Get(L"ProcessID", 0, &vtProp, 0, 0);
 				hres = pclsObj->Get(L"ParentProcessID", 0, &vtProp2, 0, 0);
 
 				std::wstring parentProcessId = std::to_wstring(vtProp2.uintVal);
 				std::wstring processId = std::to_wstring(vtProp.uintVal);
 
+				// Comparison between the Parent PID and the input PID. If equals, the child process is Terminated.
 				if (wcscmp(parentProcessId.c_str(), argument) == 0) {
 
 					BSTR ClassName = SysAllocString(L"Win32_Process");
 
+					// Handler for the function
 					std::wstring classNameInstance = L"Win32_Process.Handle=";
 					std::wstring argumentString(const_cast<wchar_t*>(processId.c_str()));
 					classNameInstance.append(L"\"").append(argumentString).append(L"\"");
@@ -304,7 +309,6 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 
 					std::wcout << "Child Process With ID: " << processId << std::endl;
 
-
 					// Clean up
 					//--------------------------
 					VariantClear(&pcVal);
@@ -312,7 +316,6 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 					SysFreeString(MethodName);
 					pClass->Release();
 					pInParamsDefinition->Release();
-					pLoc->Release();
 				}
 			}
 
@@ -385,6 +388,7 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 	else if (mode == "ImageName") {
 		// No Child Mode
 		if (child == "NoChild") {
+			// Execute query to obtain all processes
 			IEnumWbemClassObject* pEnumerator = NULL;
 			hres = pSvc->ExecQuery(
 				bstr_t("WQL"),
@@ -410,6 +414,7 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 
 			bool success = false;
 
+			// Iterate all processes
 			while (pEnumerator)
 			{
 				hres = pEnumerator->Next(WBEM_INFINITE, 1,
@@ -423,9 +428,10 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 				VARIANT vtProp;
 				VARIANT vtProp2;
 
-				// Get the value of the Name property
+				// Get the value of the Name and PID properties
 				hres = pclsObj->Get(L"Name", 0, &vtProp, 0, 0);
 				hres = pclsObj->Get(L"ProcessID", 0, &vtProp2, 0, 0);
+				// Comparison between our input Image Name and the Process Name. If matches, the PID is Terminated.
 				if (wcscmp(vtProp.bstrVal, argument) == 0) {
 					std::wstring processId = std::to_wstring(vtProp2.uintVal);
 
@@ -511,6 +517,7 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 		//Child Mode. There is a first iteration to find out ProcessId coressponding to the Image Name. For each ProcessID found, there is another
 		//iteration to search for childs of that process.
 		else {
+			// Query to obtain all processes
 			IEnumWbemClassObject* pEnumerator = NULL;
 			hres = pSvc->ExecQuery(
 				bstr_t("WQL"),
@@ -534,8 +541,10 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 
 			wchar_t* pid;
 
+			// Variable to indicate success in process finding
 			bool success = false;
 
+			// Iterate all processes
 			while (pEnumerator)
 			{
 				hres = pEnumerator->Next(WBEM_INFINITE, 1,
@@ -548,8 +557,6 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 
 				VARIANT vtProp;
 				VARIANT vtProp2;
-
-				// Variable to indicate success in process finding
 
 				// Get the value of the Name and ProcessID properties
 				hres = pclsObj->Get(L"Name", 0, &vtProp, 0, 0);
@@ -578,7 +585,7 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 					ULONG uReturn2 = 0;
 
 					wchar_t* pid;
-
+					// Second iteration to find new childs for the matching PID.
 					while (pEnumerator2)
 					{
 						hres = pEnumerator2->Next(WBEM_INFINITE, 1,
@@ -651,7 +658,6 @@ int LocalTaskKill(wchar_t* argument, const char* mode, const char* child)
 							}
 
 							std::wcout << "Child Process " << processId << " Terminated, from Parent " << iteratedProcessId << " Processs" << std::endl;
-
 
 							// Clean up
 							//--------------------------
